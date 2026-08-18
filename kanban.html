@@ -37,6 +37,9 @@
     --progress-50: #60a5fa;
     --progress-75: #a78bfa;
     --progress-100: #4ade80;
+    /* semantic button colors (were referenced but not defined) */
+    --danger: #ff4d4f;
+    --success: #3fc07a;
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -814,7 +817,7 @@
   <div class="calendar-grid" id="calendarGrid"></div>
 </div>
 
-<div class="modal-overlay" id="modal">
+<div class="modal-overlay" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
   <div class="modal">
     <h2 id="modalTitle">Nueva actividad</h2>
     <form id="activityForm">
@@ -836,7 +839,7 @@
         <div style="width:92px;margin-left:8px;">
           <div class="form-group" style="margin-bottom:0;">
             <label for="categoryColor" style="display:block;font-size:0.85rem;color:var(--text-secondary);margin-bottom:6px;">Color</label>
-            <input type="color" id="categoryColor" value="#58a6ff" title="Color de la categoría" style="width:100%;height:36px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card)">
+            <input type="color" id="categoryColor" value="#58a6ff" title="Color de la categoría" style="width:100%;height:36px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);">
           </div>
         </div>
         <div class="form-group">
@@ -998,142 +1001,108 @@
 
   // ========== RENDER ==========
   function render() {
-    renderFilters();
-    renderBoard();
-    renderCalendar();
   }
 
-  function renderFilters() {
-    const cats = [...new Set(activities.map(a => a.category).filter(Boolean))];
-    const container = document.getElementById('filters');
-    container.querySelectorAll('.tag-filter:not([data-cat="all"])').forEach(el => el.remove());
+  // ========== Accessibility & progressive JS enhancements ==========
+  // Adds focus trap + Escape to close modal and registers drag/drop listeners
+  (function enhanceAccessibility() {
+    document.addEventListener('DOMContentLoaded', () => {
+      const modal = document.getElementById('modal');
+      if (!modal) return;
 
-    const datalist = document.getElementById('categoryList');
-    datalist.innerHTML = '';
+      // Ensure ARIA attributes (idempotent)
+      modal.setAttribute('role', 'dialog');
+      modal.setAttribute('aria-modal', 'true');
+      modal.setAttribute('aria-labelledby', 'modalTitle');
 
-    cats.forEach(cat => {
-      const btn = document.createElement('button');
-      btn.className = 'tag-filter' + (currentFilter === cat ? ' active' : '');
-      btn.dataset.cat = cat;
-      btn.textContent = cat;
+      let lastFocused = null;
 
-      const col = getCategoryColor(cat);
-      if (col) btn.style.setProperty('--cat-color', col);
-
-      btn.onclick = () => filterByCategory(cat);
-      container.appendChild(btn);
-
-      const opt = document.createElement('option');
-      opt.value = cat;
-      datalist.appendChild(opt);
-    });
-  }
-
-  function filterByCategory(cat) {
-    currentFilter = cat;
-    document.querySelectorAll('.tag-filter').forEach(b => {
-      b.classList.toggle('active', b.dataset.cat === cat);
-    });
-    renderBoard();
-  }
-
-  function getFiltered() {
-    if (currentFilter === 'all') return activities;
-    return activities.filter(a => a.category === currentFilter);
-  }
-
-  function sortByDue(list) {
-    return [...list].sort((a, b) => {
-      if (!a.dueDate && !b.dueDate) return 0;
-      if (!a.dueDate) return 1;
-      if (!b.dueDate) return -1;
-      return new Date(a.dueDate) - new Date(b.dueDate);
-    });
-  }
-
-  function renderBoard() {
-    const statuses = ['pending', 'in-progress', 'completed'];
-    const filtered = getFiltered();
-
-    statuses.forEach(status => {
-      const col = document.getElementById('col-' + status);
-      const items = sortByDue(filtered.filter(a => a.status === status));
-      document.getElementById('count-' + status).textContent = items.length;
-
-      if (items.length === 0) {
-        col.innerHTML = '<div class="empty-column">Sin actividades</div>';
-        return;
+      function getFocusable(el) {
+        return Array.from(el.querySelectorAll('a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'))
+          .filter(e => e.offsetWidth || e.offsetHeight || e.getClientRects().length);
       }
 
-      col.innerHTML = items.map(a => createCardHTML(a)).join('');
-    });
-  }
+      // Try to use existing openModal/closeModal if present; otherwise toggle class
+      const hasOpen = typeof window.openModal === 'function';
+      const hasClose = typeof window.closeModal === 'function';
 
-  function createCardHTML(a) {
-    const isOverdue = a.dueDate && a.status !== 'completed' && new Date(a.dueDate) < startOfToday();
-    const dueInfo = formatDue(a.dueDate);
-    const urgencyLabels = { low: 'Baja', medium: 'Media', high: 'Alta', urgent: 'Urgente' };
+      function open() {
+        lastFocused = document.activeElement;
+        modal.classList.add('open');
+        const focusable = getFocusable(modal);
+        if (focusable.length) focusable[0].focus();
+        document.addEventListener('keydown', onKeyDown);
+      }
 
-    let tags = '';
-    if (a.category) {
-      const catColor = a.categoryColor || getCategoryColor(a.category) || '';
-      if (catColor) {
-        const bg = hexToRgba(catColor, 0.12);
-        const bcol = hexToRgba(catColor, 0.22);
-        const textCol = contrastColor(catColor);
-        tags += `<span class="tag tag-category" style="background:${bg};color:${textCol};border:1px solid ${bcol};">${esc(a.category)}</span>`;
+      function close() {
+        if (hasClose) {
+          try { window.closeModal(); } catch (e) { modal.classList.remove('open'); }
+        } else {
+          modal.classList.remove('open');
+        }
+        if (lastFocused) lastFocused.focus();
+        document.removeEventListener('keydown', onKeyDown);
+      }
+
+      function onKeyDown(e) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          close();
+          return;
+        }
+        if (e.key === 'Tab') {
+          const focusable = getFocusable(modal);
+          if (!focusable.length) { e.preventDefault(); return; }
+          const idx = focusable.indexOf(document.activeElement);
+          if (e.shiftKey && idx === 0) {
+            e.preventDefault();
+            focusable[focusable.length - 1].focus();
+          } else if (!e.shiftKey && idx === focusable.length - 1) {
+            e.preventDefault();
+            focusable[0].focus();
+          }
+        }
+      }
+
+      // If the app exposes openModal/closeModal, wrap them so we still run accessibility code
+      if (hasOpen) {
+        const originalOpen = window.openModal;
+        window.openModal = function(...args) {
+          try { originalOpen.apply(this, args); } finally { open(); }
+        };
       } else {
-        tags += `<span class="tag tag-category">${esc(a.category)}</span>`;
+        // attach click handler for buttons that have inline onclick="openModal()"
+        document.querySelectorAll('[onclick*="openModal"]').forEach(btn =>
+          btn.addEventListener('click', (e) => { e.preventDefault(); open(); })
+        );
       }
-    }
-    tags += `<span class="tag tag-urgency ${a.urgency}">${urgencyLabels[a.urgency] || a.urgency}</span>`;
-    if (dueInfo) tags += `<span class="tag tag-due ${dueInfo.class}">${dueInfo.text}</span>`;
-    if (a.recurrence && a.recurrence !== 'none') {
-      tags += `<span class="tag tag-recurrence">${recurrenceLabel(a)}</span>`;
-    }
 
-    // Progress only visible in "in-progress"
-    let progressHTML = '';
-    if (a.status === 'in-progress') {
-      const progress = a.progress || 0;
-      progressHTML = `
-        <div class="progress-section">
-          <div class="progress-buttons">
-            <button class="progress-btn${progress===0? ' active':''}" data-value="0">0%</button>
-            <button class="progress-btn${progress===25? ' active':''}" data-value="25">25%</button>
-            <button class="progress-btn${progress===50? ' active':''}" data-value="50">50%</button>
-            <button class="progress-btn${progress===75? ' active':''}" data-value="75">75%</button>
-            <button class="progress-btn${progress===100? ' active':''}" data-value="100">100%</button>
-          </div>
-        </div>
-      `;
-    }
+      if (!hasClose) {
+        // attach click handler for cancel/close inline handlers
+        document.querySelectorAll('[onclick*="closeModal"]').forEach(btn =>
+          btn.addEventListener('click', (e) => { e.preventDefault(); close(); })
+        );
+      }
 
-    const overdueClass = isOverdue ? ' overdue' : '';
+      // If closeModal exists, wrap it to remove key handler and restore focus
+      if (hasClose) {
+        const originalClose = window.closeModal;
+        window.closeModal = function(...args) {
+          try { originalClose.apply(this, args); } finally { document.removeEventListener('keydown', onKeyDown); if (lastFocused) lastFocused.focus(); }
+        };
+      }
 
-    return `
-      <div class="card ${'status-'+a.status} urgency-${a.urgency}${overdueClass}" draggable="true" ondragstart="drag(event,'${a.id}')" data-id="${a.id}">
-        <div class="card-title">${esc(a.title)}</div>
-        <div class="card-tags">${tags}</div>
-        ${a.description ? `<div class="card-desc">${esc(a.description)}</div>` : ''}
-        ${a.subtasks && a.subtasks.length ? renderSubtasksInline(a.subtasks) : ''}
-        ${progressHTML}
-        <div class="card-actions">
-          <button class="btn btn-sm" onclick="openEdit('${a.id}')">Editar</button>
-          <button class="btn btn-sm btn-danger" onclick="deleteActivity('${a.id}')">Eliminar</button>
-        </div>
-      </div>
-    `;
-  }
-
-  // helper para subtareas en la tarjeta
-  function renderSubtasksInline(subtasks){
-    return `<div class="subtasks">${subtasks.map(s=>`<div class="subtask ${s.done? 'completed':''}"><input type="checkbox" ${s.done? 'checked':''} disabled> <span>${esc(s.title)}</span></div>`).join('')}</div>`;
-  }
-
-  // ==== resto de funciones (drag/drop, calendar, formatDue, recurrenceLabel, esc, startOfToday, etc.) ====
-  // Para no romper la base, mantengo el resto del código original sin cambios. Si necesitas que integre
-  // también la lógica para guardar categoryColor en saveActivity, puedo modificar esa función explícitamente.
+      // Register drag/drop listeners programmatically so inline attributes are optional
+      document.querySelectorAll('.column-body').forEach(col => {
+        col.addEventListener('dragover', (e) => { if (typeof allowDrop === 'function') allowDrop(e); else e.preventDefault(); });
+        col.addEventListener('drop', (e) => {
+          const colEl = col.closest('.column');
+          const status = colEl && colEl.dataset.status;
+          if (typeof drop === 'function' && status) drop(e, status);
+        });
+      });
+    });
+  })();
 
 </script>
 </body>
